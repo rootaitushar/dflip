@@ -9,13 +9,15 @@ type FlipBookProps = {
 };
 
 export default function FlipBook({ pdfUrl }: FlipBookProps) {
-	const [pages, setPages] = useState<string[]>([]);
+	const [pages, setPages] = useState<(string | null)[]>([]);
 	const [loading, setLoading] = useState<boolean>(true);
 	const [error, setError] = useState<string | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const [bookSize, setBookSize] = useState<{ width: number; height: number }>({ width: 360, height: 512 });
 	const bookRef = useRef<any>(null);
 	const [currentPage, setCurrentPage] = useState<number>(0);
+	const pdfRef = useRef<PDFDocumentProxy | null>(null);
+	const abortRef = useRef<AbortController | null>(null);
 
 	useEffect(() => {
 		if (!containerRef.current) return;
@@ -38,6 +40,8 @@ export default function FlipBook({ pdfUrl }: FlipBookProps) {
 			setLoading(true);
 			setError(null);
 			setPages([]);
+			abortRef.current?.abort();
+			abortRef.current = new AbortController();
 			try {
 				const pdfjs = await import("pdfjs-dist/legacy/build/pdf");
 				(pdfjs as unknown as { GlobalWorkerOptions: { workerSrc: string } }).GlobalWorkerOptions.workerSrc = "/pdf.worker.legacy.min.mjs";
@@ -48,23 +52,15 @@ export default function FlipBook({ pdfUrl }: FlipBookProps) {
 					fetchUrl = `${pdfUrl}${pdfUrl.includes("?") ? "&" : "?"}v=${bust}`;
 				}
 				const pdf: PDFDocumentProxy = await (pdfjs as unknown as { getDocument: (src: string) => { promise: Promise<PDFDocumentProxy> } }).getDocument(fetchUrl).promise;
-				const renderedPages: string[] = [];
-				for (let i = 1; i <= pdf.numPages; i++) {
-					const page: PDFPageProxy = await pdf.getPage(i);
-					const scale = 2;
-					const targetWidth = bookSize.width;
-					const viewport = page.getViewport({ scale: scale * (targetWidth / page.view[2]) });
-					const canvas = document.createElement("canvas");
-					const context = canvas.getContext("2d");
-					if (!context) continue;
-					canvas.width = viewport.width as number;
-					canvas.height = viewport.height as number;
-					await page.render({ canvasContext: context, viewport }).promise;
-					renderedPages.push(canvas.toDataURL("image/jpeg", 0.92));
-				}
-				if (!cancelled) {
-					setPages(renderedPages);
-					setCurrentPage(0);
+				pdfRef.current = pdf;
+				if (cancelled) return;
+				setPages(Array.from({ length: pdf.numPages }, () => null));
+				setCurrentPage(0);
+				// Eager render first few pages (fast, lower scale on small screens)
+				const initialCount = Math.min(4, pdf.numPages);
+				for (let i = 1; i <= initialCount; i++) {
+					await renderAndStorePage(i);
+					if (cancelled) return;
 				}
 			} catch (e) {
 				if (!cancelled) setError(e instanceof Error ? e.message : "Failed to render PDF");
@@ -77,6 +73,49 @@ export default function FlipBook({ pdfUrl }: FlipBookProps) {
 			cancelled = true;
 		};
 	}, [pdfUrl, bookSize.width]);
+
+	// Render helper with adaptive scale and idle scheduling
+	async function renderAndStorePage(pageNumber: number, priority: boolean = false) {
+		const pdf = pdfRef.current;
+		if (!pdf) return;
+		if (pages[pageNumber - 1]) return; // already rendered
+		// Adaptive scale: smaller on mobile to speed up
+		const isNarrow = bookSize.width < 360;
+		const baseScale = isNarrow ? 1.2 : 1.6;
+		const page: PDFPageProxy = await pdf.getPage(pageNumber);
+		const targetWidth = bookSize.width;
+		const viewport = page.getViewport({ scale: baseScale * (targetWidth / page.view[2]) });
+		const canvas = document.createElement("canvas");
+		const context = canvas.getContext("2d");
+		if (!context) return;
+		canvas.width = viewport.width as number;
+		canvas.height = viewport.height as number;
+		await page.render({ canvasContext: context, viewport }).promise;
+		const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+		setPages((prev) => {
+			const next = prev.slice();
+			next[pageNumber - 1] = dataUrl;
+			return next;
+		});
+	}
+
+	// When page flips, pre-render neighbors around the current page lazily
+	useEffect(() => {
+		if (!pdfRef.current || pages.length === 0) return;
+		const neighbors: number[] = [];
+		for (let d = -2; d <= 3; d++) {
+			const p = currentPage + 1 + d; // pages are 1-based in pdf.js
+			if (p >= 1 && p <= pages.length) neighbors.push(p);
+		}
+		(async () => {
+			for (const p of neighbors) {
+				if (!pages[p - 1]) {
+					await renderAndStorePage(p);
+				}
+			}
+		})();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [currentPage, bookSize.width]);
 
 	if (loading) return <div className="w-full text-center py-8">Loading PDF…</div>;
 	if (error) return <div className="w-full text-center py-8 text-red-600">{error}</div>;
@@ -118,7 +157,11 @@ export default function FlipBook({ pdfUrl }: FlipBookProps) {
 				>
 					{pages.map((src, i) => (
 						<div key={i} className="bg-white">
-							<img src={src} alt={`Page ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+							{src ? (
+								<img src={src} alt={`Page ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+							) : (
+								<div className="w-full h-full flex items-center justify-center text-sm text-gray-500">Rendering…</div>
+							)}
 						</div>
 					))}
 				</HTMLFlipBook>
