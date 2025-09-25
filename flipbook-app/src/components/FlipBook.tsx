@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { PDFDocumentProxy, PDFPageProxy, GlobalWorkerOptions as GlobalWorkerOptionsType } from "pdfjs-dist/legacy/build/pdf";
-import Image from "next/image";
+import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/legacy/build/pdf";
 import HTMLFlipBook from "react-pageflip";
 
 type FlipBookProps = {
@@ -14,7 +13,9 @@ export default function FlipBook({ pdfUrl }: FlipBookProps) {
 	const [error, setError] = useState<string | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const [bookSize, setBookSize] = useState<{ width: number; height: number }>({ width: 360, height: 512 });
-	const bookRef = useRef<any>(null);
+type PageFlipInstance = { flipPrev: () => void; flipNext: () => void; turnToPage: (index: number) => void };
+type FlipBookHandle = { pageFlip: () => PageFlipInstance };
+const bookRef = useRef<FlipBookHandle | null>(null);
 	const [currentPage, setCurrentPage] = useState<number>(0);
 	const pdfRef = useRef<PDFDocumentProxy | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
@@ -127,10 +128,7 @@ export default function FlipBook({ pdfUrl }: FlipBookProps) {
 	function goNext() {
 		bookRef.current?.pageFlip()?.flipNext();
 	}
-	function goTo(indexZeroBased: number) {
-		const safe = Math.max(0, Math.min(indexZeroBased, pages.length - 1));
-		bookRef.current?.pageFlip()?.turnToPage(safe);
-	}
+
 
 	return (
 		<div ref={containerRef} className="w-full mx-auto">
@@ -151,8 +149,8 @@ export default function FlipBook({ pdfUrl }: FlipBookProps) {
 					maxShadowOpacity={0.5}
 					mobileScrollSupport={true}
 					usePortrait={true}
-					onFlip={(e: any) => {
-						if (typeof e?.data === "number") setCurrentPage(e.data);
+                onFlip={(e: { data: number }) => {
+                    if (typeof e?.data === "number") setCurrentPage(e.data);
 					}}
 				>
 					{pages.map((src, i) => (

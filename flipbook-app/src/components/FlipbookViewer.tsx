@@ -24,7 +24,7 @@ export default function FlipbookViewer() {
 		const raw = inputUrl.trim();
 		if (!raw) return;
 		setInputError(null);
-		let target = raw;
+    const target = raw;
 		// Accept absolute http(s) or same-origin path starting with /
 		const isAbsolute = /^https?:\/\//i.test(target);
 		if (!isAbsolute && !target.startsWith("/")) {
@@ -48,12 +48,12 @@ export default function FlipbookViewer() {
 			try {
 				const head = await fetch(target, { method: "HEAD", cache: "no-store", redirect: "follow", mode: "cors" });
 				ok = head.ok;
-			} catch {
+            } catch {
 				// Some servers block HEAD; try small GET range
 				try {
 					const getResp = await fetch(target, { method: "GET", headers: { Range: "bytes=0-1" }, cache: "no-store", redirect: "follow", mode: "cors" });
 					ok = getResp.ok || getResp.status === 206;
-				} catch (e) {
+                } catch {
 					ok = false;
 				}
 			}
