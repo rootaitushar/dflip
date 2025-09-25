@@ -13,7 +13,7 @@ export async function GET() {
 			.filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".pdf"))
 			.map((e) => ({ name: e.name, url: `/pdfs/${e.name}` }));
 		return NextResponse.json({ pdfs });
-	} catch (error) {
+	} catch {
 		return NextResponse.json({ pdfs: [], error: "Failed to list PDFs" }, { status: 500 });
 	}
 }
